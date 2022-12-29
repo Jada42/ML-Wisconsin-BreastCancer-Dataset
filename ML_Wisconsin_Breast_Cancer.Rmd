@@ -1,0 +1,700 @@
+---
+title: "Classification of Breast Cancer & Visualization Assignment Data Mining"
+Student: Julian Adam
+Date: '2022-09-28'
+output:
+  pdf_document: default
+  word_document: default
+  html_document: 
+    toc: yes
+    keep_md: yes
+toc: yes
+theme: cosmo
+highlight: tango
+code_folding: hide
+fig_width: 12
+fig_height: 8
+---
+
+# **Case Study**
+
+## Setup (Installing & Loading Packages)
+
+```{r setup, include=FALSE}
+r = getOption("repos")
+r["CRAN"] = "http://cran.us.r-project.org"
+options(repos = r)
+knitr::opts_chunk$set(
+	eval = F,
+	message = F,
+	warning = F,
+	include = F,
+	echo = T
+)
+install.packages("stargazer", qietly = TRUE)
+install.packages("mgcViz", qietly = TRUE)
+library("devtools")
+library("caret")
+library("ggplot2")
+library("tidyverse")
+library("pROC")
+library("neuralnet")
+library("GGally")
+library("randomForest")
+library("gam")
+library("dplyr")
+library("knitr")
+library("psych", warn.conflicts=F)
+library("factoextra")
+library("caret")
+library("corrplot")
+library("PerformanceAnalytics")
+library("GGally")
+library("tidyverse")
+library("ggfortify")
+library("modelr")
+library("Hmisc")
+library(mgcViz)
+library(MASS)
+
+options(na.action = na.warn)
+```
+
+## 1) Introduction
+
+Breast cancer is the second most common and also the second leading cause of cancer deaths of women in the United States. According to the American Cancer Society, on average every 1 in 8 women in the United States would develop breast cancer in her lifetime, and 2.6% would die from breast cancer. One of the warning symptoms of breast cancer is the development of a tumor in the breast. Generally, a tumor can benign or malignant. This project aims to identify bening and malignant tumors with machine learning (ML) and deep learning (DL) methods.
+
+## 2. Importing, Inspecting and Cleaning Data
+
+### 2-1) Import Data set
+
+```{r import, echo=TRUE}
+wbcd <- read.csv("Assignment_CaseStudy_Data_wdbc.csv")
+```
+
+### 2-2) Inspecting Classes of Each Variable
+
+```{r glimpse, results='markup', echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+
+glimpse(wbcd)
+```
+
+We have 569 observations with 12 variables.
+
+### 2-3) Cleaning Data set
+
+#### 2-3-1) Converting Variables
+
+```{r cleaning}
+
+wbcd$diagnosis <- as.factor(wbcd$diagnosis)
+  names(wbcd)[names(wbcd) == "Sample.ID"] <- "Sample_ID"
+```
+
+Changing the class for the outcome variables of "diagnosis" from character to factor.
+
+### 2-4) Checking for Missing Values
+
+Using the "map" function from the "purrr" package which is available within "tidyverse" is able to transform the input. It applies a function to each element of a list/atomic vector. Here, map_int() outputs integer vectors, which have numbers with no decimals. This is useful when we want to find the sum of missing values/Na's. Additionally, I added a reproducible "if" and "else" function that prints out if future NAs are present in the data set.
+
+```{r NA/missing values}
+map_int(wbcd, function(.x) sum(is.na(.x)))
+
+# If-else function
+# Duplicate for numerical values of B and M (1, 0). Explanation: Otherwise I will get 1,1 in the next table (see, chapter 3) and we need numerical values for the correlation Matrix below (see, Chapter)
+
+# Note: Creating Wbcd_test for numeric algorithms
+
+wbcd_test <- wbcd
+
+CheckColNA <- if (ncol(Filter(function(x) any(is.na(x)), wbcd)) > 0) {
+  cat("columns have NA:",ncol(Filter( function(x) any(is.na(x)), wbcd)))
+  cat("\n\n")
+  cat("columns names that have nulls:",colnames(Filter( function(x) any(is.na(x)), wbcd)))
+  cat("\n\n")
+} else {
+  print("No NAs found, great!")
+  #NO NULL VALUES
+  wbcd_test$diagnosis <- (ifelse(wbcd$diagnosis=='B', 0, 1))}
+
+```
+
+We can see, that this data frame has no missing values.
+
+## 3) Data Exploration
+
+### 3-1) Checking Benign and Malignant Variables
+
+```{r Exploration}
+tb1=round(prop.table(table(wbcd$diagnosis)),2)
+tb1
+```
+
+We have a have a higher conditional proportion of B (0.63).
+
+```{r Exploration 2}
+
+# Counting diagnoses
+# Checking Summary and descriptive analysis of dataset
+  str(wbcd)
+  summary(wbcd)
+  table(wbcd$diagnosis)
+  prop.table(table(wbcd$diagnosis))
+  
+  ## Discriptive Analysis using the "psych" package
+  psych::describeBy(wbcd[3:12], group=wbcd$diagnosis)
+
+  
+# GGPlots
+
+  ggplot(data = wbcd) +
+    geom_histogram(mapping = aes(x = radius), binwidth = 0.5)
+
+  ggplot(data = wbcd) +
+    geom_histogram(mapping = aes(x = texture), binwidth = 0.5)
+
+# Histogram and frequency poly for visualization of data set and radius/diagnoses
+
+  ggplot(data = wbcd, mapping = aes(x = radius, colour = diagnosis)) +
+    geom_histogram(binwidth = 0.01)
+
+  ggplot(data = wbcd, mapping = aes(x = radius, colour = diagnosis)) +
+    geom_freqpoly(binwidth = 0.1)
+
+# Adding freqpoly and boxplot with more colours for visualising data based on diagnosis
+
+  ggplot(data = wbcd, mapping = aes(x = radius, colour = diagnosis)) +
+    geom_boxplot(binwidth = 0.1)
+
+  ggplot(data = wbcd, mapping = aes(x = radius, colour = diagnosis)) +
+    geom_freqpoly(binwidth = 0.1)
+#Checking if texture has same visual presentation to see if there is a pattern among variables
+  ggplot(data = wbcd, mapping = aes(x = texture, colour = diagnosis)) +
+    geom_freqpoly(binwidth = 0.1)
+
+```
+
+We can identify that radius and texture seems a quite reliable to identify Malignant and Benign diagnoses.
+
+### 3-2) Correlations and Multicollinearity
+
+#### 3-2-1) Correlations
+
+We can check for correlations regarding the predictor variable. In general, ML models assume that predictor variables are independent of each other. Additionally, we can check and remove multicollinearity.
+
+Multicollinearity is a condition where a predictor variable correlates with another predictor. Essentially multicollinearity doesn't affect the model's performance, but it will affect a model's interpretability.
+
+```{r Correlations}
+wbcd_corr <- cor(wbcd %>% dplyr::select(-Sample_ID, -diagnosis))
+corrplot::corrplot(wbcd_corr, order = "hclust", tl.cex = 0.7, addrect = 8)
+
+```
+
+As we can see, there are quite a few correlated variables. We will remove the highly correlated ones with the "caret" package to ensure a robust analysis.
+
+Additionally, I will provide a correlation matrix
+
+```{r Correlations 2}
+
+  CorrMat <- function(cormat, pmat) {
+    ut <- upper.tri(cormat)
+    data.frame(
+      row = rownames(cormat)[row(cormat)[ut]],
+      column = rownames(cormat)[col(cormat)[ut]],
+      cor  =(cormat)[ut],
+      p = pmat[ut]
+    )
+  }
+  corr_res <- Hmisc::rcorr(as.matrix(wbcd_test[,c(2:11)]))
+  CorrMat(corr_res$r, corr_res$P)
+```
+
+#### 3-2-2) Multicollinearity
+
+The findcorrelation() function removes multicollinearity based on a threshold that we can choose via "cutoff". Here, we choose a threshold of 0.9
+
+```{r Multicollinearity}
+library(caret)
+
+wbcd2 <- wbcd %>% dplyr::select(-findCorrelation(wbcd_corr, cutoff = 0.9))
+
+#Number of columns for our new data frame - multicollienartiy
+ncol(wbcd2)
+```
+
+The new data frame "wbcd2" is now 2 columns shorter. The next step will cover pre-processing and analyzing the variance of our data set with a PCA.
+
+## 4) Pre-Processing / PCA
+
+```{r PCA processing}
+preproc_pca_wbcd <- prcomp(wbcd %>% dplyr::select(-Sample_ID, -diagnosis), scale = TRUE, center = TRUE)
+summary(preproc_pca_wbcd)
+```
+
+We can observe, that almost 97% of the original Data set's variance is explained by the first 5 Principal Components (PC's). Next, we can check which variables account for the most variance explained within each PC.
+
+### 4-1) Calculating the Explained Variance Proportions (Visualization)
+
+```{r PCA-Summary}
+pca_wbcd_var <- preproc_pca_wbcd$sdev^2
+pve_wbcd <- pca_wbcd_var / sum(pca_wbcd_var)
+cum_pve <- cumsum(pve_wbcd)
+pve_table <- tibble(comp = seq(1:ncol(wbcd %>% dplyr::select(-Sample_ID, -diagnosis))), pve_wbcd, cum_pve)
+
+ggplot(pve_table, aes(x = comp, y = cum_pve)) + 
+  geom_point() + 
+  geom_abline(intercept = 0.95, color = "red", slope = 0) + 
+  labs(x = "Number of Components", y = "Cumulative Variance")
+```
+
+95% of the cumulative variance is explained within the first 5 components. We can check this additionally with a scree plot via the "PCAtools" package.
+
+Lets check the **"Scree Plot"**:
+
+```{r Screeplot}
+# PCA with SCREEPLOT
+
+numerical_vars <- wbcd %>% 
+  # select numeric variables
+  select_if(is.numeric) %>% 
+  # discard the year variable
+  dplyr::select(-Sample_ID) %>% 
+  # convert the dataframe to a matrix
+  as.matrix()
+
+# transpose the matrix (flip rows and columns)
+numerical_vars_flipped <- t(numerical_vars)
+categorical_vars <- wbcd %>% select_if(is.factor) %>% as.matrix()
+
+
+pca_scree <- PCAtools::pca(mat = numerical_vars_flipped, metadata = categorical_vars, center = TRUE, scale = TRUE)
+
+# get the principle components data out of the pca object
+pca_data <- pca_scree$rotated
+# add the species variable onto the pca data
+pca_data[['diagnosis']] <- pca_scree$metadata[,'diagnosis']
+
+
+PCAtools::screeplot(pca_scree, drawCumulativeSumLine = FALSE, drawCumulativeSumPoints = FALSE, 
+                    xlab = NULL, subtitle = NULL)
+```
+
+To understand and visualize the Data more, I will include additional Scree plots with trend-lines.
+
+```{r Additional Screeplots and PCA Charts, fig.height=3, fig.width=4}
+
+# Additional Screeplots (fviz_screeplot)
+
+wbcd_pca <- transform(wbcd_test)
+
+ all_pca <- prcomp(wbcd_pca[,c(3:12)], cor=TRUE, scale=TRUE)
+
+#Using Fviz_screeplot for better visualisation
+  fviz_screeplot(all_pca, addlabels=TRUE, ylim=c(0,60), geom = c("bar", "line"), barfill = "pink", barcolor="grey",linecolor = "red", ncp=10)+
+    labs(title = "Cancer All Variances - PCA",
+         x = "Principal Components", y = "% of variances")
+
+#We can clearly identify that PC1 and PC2 contribute to 77.6% of the variances
+
+
+  fviz_pca_var(all_pca, labelsize = 5, repel = TRUE) +
+    theme(text = element_text(size = 27.5, color="#002b80"),
+          axis.title = element_text(size = 17.5),
+          axis.text = element_text(size = 17.5)) +
+    labs(title="All variables in Dim1 and Dim2",
+         x="Dim2 (22.6%)",
+         y="Dim1 (55%)")
+
+#Checking contributions of variables to Dim1 and Dim2
+  library(gridExtra)
+
+  p1 <- fviz_contrib(all_pca, choice="var", axes=1, fill="mistyrose", top=10)
+  p2 <- fviz_contrib(all_pca, choice="var", axes=2, fill="skyblue", top=10)
+
+  grid.arrange(p1, p2, ncol=2)
+
+#getting PCA variables and variances
+  all_var <- get_pca_var(all_pca)
+  all_var
+  
+  #Printing the correlations accross all dim's
+  print(all_var$cor)
+  
+```
+
+The findings are in alignment with the plot in 4-1). Additionally, we can identify that some variables have a higher influence on the dim's as shown in the plots above.
+
+Next, we check the most significant variables within the first 2 components and visualize them.
+
+```{r PCA extra}
+pca_wbcd <- as_tibble(preproc_pca_wbcd$x)
+
+sp = ggplot(pca_wbcd, aes(x = PC1, y = PC2, col = wbcd$diagnosis)) + geom_point() + ggtitle("Principal Component Analysis") +  guides(color = guide_legend(title = 'Diagnosis'))
+sp + geom_density2d()
+```
+
+Here, PC1 and PC2 demonstrate the proportional variance in each PC. Where Malignant diagnoses generally have a greater variance as Benign diagnoses.
+
+```{r fig.height=12, fig.width=12}
+library(PCAtools)
+suppressMessages(PCAtools::pairsplot(pcaobj = pca_scree, components = getComponents(pca_scree), 
+                      colby = 'diagnosis', trianglelabSize = 20, axisLabSize = 17))
+```
+
+Plotting all PCs highlights the increase in density of the proportional variance. In PC1 and PC2 we have less density than in the following PCs.
+
+```{r}
+pca_wbcd2 <- prcomp(numerical_vars, center = TRUE, scale. = TRUE)
+```
+
+```{r fig.height=4, fig.width=4}
+factoextra::fviz_pca_biplot(preproc_pca_wbcd, label = 'var', repel = TRUE, 
+                            habillage = wbcd$diagnosis, # colour
+                            palette = c("#00AFBB", "#E7B800"),
+                            addEllipses = TRUE,
+                            col.var = "darkred"
+)
+```
+
+The Bi-plot gives more insight into variables that account for "Benign" and "Malignant" diagnoses. We can see these variables indicated by the red arrows. Above (See, Data Exploration, Chapter 3) we have visualized the variables radius and texture. Here, we can identify that additional variables allows a good classification of Malignant and Benign dieagnoses.
+
+```{r autoplot, fig.height=4, fig.width=4}
+library(ggfortify)
+autoplot(preproc_pca_wbcd, data = wbcd,  colour = 'diagnosis',
+                    loadings = FALSE, loadings.label = TRUE, loadings.colour = "blue")
+```
+
+\
+We can further visualize the first three components, and check for correlations\
+
+```{r}
+wbcd_pcs <- cbind(as_tibble(wbcd$diagnosis), as_tibble(preproc_pca_wbcd$x))
+GGally::ggpairs(wbcd_pcs, columns = 2:4, ggplot2::aes(color = value))
+```
+
+## 5) Clustering (K-Means, Hierarchical, etc.)
+
+The K-means algorithm is a robust and versatile cluster algorithm that is often used as a benchmark for multiple problems and solutions. Despite its simplicity, K-means can outperform more complex methods.
+
+```{r H Clustering with PCA, fig.height=5, fig.width=10}
+# Scale the wbcd_test (numeric) data: data.scaled
+data.scaled <- scale(wbcd_test)
+
+# Calculate the (Euclidean) distances: data.dist
+data.dist <- dist(data.scaled)
+
+# Create a hierarchical clustering model with "complete" option: wisc.hclust
+wbcd.hclust <- hclust(data.dist, method = "complete")
+
+plot(wbcd.hclust)
+```
+
+We can see multiple clusters. The "complete" option visualizes the dendrogram quite well. However, it would be more useful to cut the tree into smaller clusters. Below I will use a cluster with 4 partitions.
+
+```{r Clustering}
+# Cutting the tree so that it has 4 clusters: wisc.hclust.clusters
+wbcd.hclust.clusters <- cutree(wbcd.hclust, k = 4)
+
+# Comparing cluster membership to actual diagnoses
+table(wbcd.hclust.clusters, wbcd$diagnosis)
+```
+
+```{r K-Means without PCA}
+
+# Creating a k-means model on wbcd_test (numeric): wbcd.km
+wbcd.km <- kmeans(scale(wbcd_test), centers = 2, nstart = 20)
+
+# Comparing k-means to actual diagnoses
+table(wbcd.km$cluster, wbcd$diagnosis)
+
+# Comparing k-means to hierarchical clustering
+table(wbcd.hclust.clusters, wbcd.km$cluster)
+```
+
+```{r K-Means with PCA, fig.height=2.5, fig.width=5}
+
+set.seed(420)
+
+wbcd.pr <- prcomp(wbcd_test, scale = TRUE)
+
+# Create a hierarchical clustering model: wisc.pr.hclust
+wbcd.pr.hclust <- hclust(dist(wbcd.pr$x[, 1:7]), method = "complete")
+
+# Cut model into 4 clusters: wisc.pr.hclust.clusters
+wbcd.pr.hclust.clusters <- cutree(wbcd.pr.hclust, k =4)
+
+# Compare to actual diagnoses
+table(wbcd$diagnosis, wbcd.pr.hclust.clusters)
+
+# Compare to k-means and hierarchical
+table(wbcd$diagnosis, wbcd.hclust.clusters)
+table(wbcd$diagnosis, wbcd.km$cluster)
+
+# Plotting K-means with PCA
+
+res.all <- kmeans(all_var$coord, centers = 6, nstart = 25)
+  grp <- as.factor(res.all$cluster)
+
+  fviz_pca_var(all_pca, col.var = grp,
+               palette = "jco",
+               legend.title = "Cluster")
+
+```
+
+The plot above highlights each cluster and their associated variables. We can see that radius, area and perimeter are in the same cluster. In the Next chapter, I will model a few advanced ML and DL models, as well as simpler models. First, I will preprocess the data set into a train and test set.
+
+## 6) Modelling (Linear Models, Generalized Linear Models, Generalized Additive Models, Neural Networks, KNN)
+
+### 6-1) LM and LDA models
+
+```{r Preprocessing for Modelling}
+
+set.seed(42)
+
+index <- createDataPartition(wbcd$diagnosis, times = 1, p = 0.7, list = FALSE)
+
+# two test and train sets. one for B and M as factors and as numeric
+train <- wbcd_test[index,]
+test <- wbcd_test[-index,]
+
+train_factor <- wbcd[index,]
+test_factor <- wbcd[-index,]
+p_control <- trainControl(method="repeatedcv",
+                            number = 10,
+                            preProcOptions = list(thresh = 0.99), # threshold for pca preprocess
+                            classProbs = T,
+                            summaryFunction = twoClassSummary)
+
+```
+
+Here, I will use the basic linear regression model to compare it to more complex models, which are mentioned and computed in the following chapter.
+
+```{r lm Model}
+
+set.seed(42)
+
+# Fitting lm model without further specification of hyperparameters
+lm_model <- lm(diagnosis ~., data = train)
+
+# Predict on full data: p
+p <- predict(lm_model, test)
+
+# Computing errors
+error <- p - train[["diagnosis"]]
+
+# Calculating RMSE
+sqrt(mean(error ^ 2))
+
+# Summary of the linear_model.
+summary(lm_model)
+
+# Extracting the coefficients.
+lm_model$coefficients
+
+# Plotting linear relationship.
+ggplot(data = train, 
+        aes(x = area, y = radius)) +
+  geom_point(size = 2, alpha = 0.3) +
+  geom_smooth(se = FALSE, method = "lm")
+
+# AIC
+
+AIC(lm_model)
+
+
+```
+
+The Output shows us that we have an rounded RMSE of 0.59. Lower RMSE values indicate a better fit. Additionally, we can see a strong linear relationship of radius and area, which is shown in the plot.
+
+```{r LDA Model}
+
+set.seed(42)
+
+lda_mod <- lda(diagnosis ~., data = train, center = TRUE, scale = TRUE, trControl = p_control); lda_mod
+
+# Predicting LDA
+p_lda <- predict(lda_mod, wbcd)$x %>% as.data.frame() %>% cbind(diagnosis=wbcd$diagnosis)
+
+# LDA training and test set based on the predictions
+lda_train <- p_lda[index, ]
+lda_test <- p_lda[-index, ]
+
+# Modelling LDA with lda training and test sets 
+
+mod_lda <- train(diagnosis~.,
+                       lda_train,
+                       method="lda2",
+                       tuneLength = 10,
+                       metric="ROC",
+                       preProc = c("center", "scale"),
+                       trControl= p_control)
+
+pred_lda <- predict(mod_lda, lda_test) # for roc curve
+
+#Plots
+
+ggplot(p_lda, aes(x=LD1, y=0, col=diagnosis)) + geom_point(alpha=0.5)
+ggplot(p_lda, aes(x=LD1, fill=diagnosis)) + geom_density(alpha=0.5)
+
+pred_prob_lda <- predict(mod_lda, lda_test, type="prob")
+caTools::colAUC(pred_prob_lda, lda_test$diagnosis, plotROC=TRUE)
+
+cm_lda <- confusionMatrix(pred_lda, lda_test$diagnosis, positive = "M")
+cm_lda
+
+print(p_lda)
+```
+
+Here we have a LDA model with a rounded accuracy of 96% additionally, the model has a high specificity and sensitivity. Through the confusion matrix, we can see that the model has 163 true predictions (true positive = 106 and true negative = 57) and seven false (false positive = 6 and false negative = 1)
+
+### 6-2) Logistic Regression (GLM), Generalized Additive Models, Neural Networks etc.
+
+#### 6-2-1) GLM
+
+```{r GLM}
+
+set.seed(42)
+
+glm_mod <- caret::train(diagnosis ~., data = train_factor, method = "glm", 
+                         metric = "ROC", preProcess = c("scale", "center"), 
+                         trControl = p_control)
+
+pred_glm <- predict(glm_mod, test_factor)
+cm_glm <- confusionMatrix(pred_glm, test_factor$diagnosis, positive = "M")
+cm_glm
+
+
+```
+
+The LDA model has a slightly higher accuracy as the GLM model (rounded 95% accuracy) a slightly higher specificity and a lower sensitivity.
+
+#### 6-2-2) GAM
+
+```{r Generalized Additive Model}
+
+library(mgcv)
+library(mgcViz)
+
+set.seed(42)
+
+# Modelling the GAM
+
+
+
+
+for(i in 1:10){
+    mod_gam = gam(diagnosis ~ s(radius) + s(area) +
+                    s(texture) +
+                    s(perimeter) + s(smoothness) +
+                    s(concavity) + s(symmetry), data = train,
+                  method = "REML", sp = 7, fit = T)
+p_gam <- predict(mod_gam, test[,-1]) 
+}
+
+gam.check(mod_gam)
+summary(mod_gam)
+
+mod_gam <- getViz(mod_gam)
+print(plot.gam(mod_gam, allTerms = T, seWithMean = T, residuals = T, coef(mod_gam)[1],pch=1, cex=0.1, shade = T, shade.col = "lightgrey"), pages = 1)
+
+# VIS.GAM visualization
+
+vis.gam(mod_gam, view=c("radius","area"), theta= 65, se= 2, plot.type = "persp")
+vis.gam(mod_gam, view=c("radius","area"), theta= 65)
+# AIC
+AIC(mod_gam, lm_model)
+
+# test w/ smaller data set+
+
+
+library(pROC)
+traingam= wbcd[sample(1:569),]
+
+index_gam <- createDataPartition(traingam$diagnosis, times = 1, p = 0.7, list = FALSE)
+traingam2 <- traingam[index_gam,]
+testgam <- traingam[-index_gam,]
+
+
+
+
+gam_test_model = train(diagnosis~., data = traingam2, method = "gamboost", 
+                         metric = "ROC", preProcess = c("scale", "center"), 
+                         trControl = p_control)
+
+
+
+
+pred_gamboost = predict(gam_test_model, testgam)
+cm_gamboost <- confusionMatrix(pred_gam, testgam$diagnosis, positive = "M")
+cm_gamboost
+```
+
+Note that the GAM has several smooths with an edf over 5, which generally indicates that the smooth is more "wiggly" or non-linear. An edf of 1 indicates that the smooth is more linear.
+
+E.g. the following plot should indicate that "symmetry" is less "wiggly" than "concavity" and "area". The p-value determines its significance (at p \> 0.05). The GAM identified that all smooths except perimeter are significant. Additionally, it was able to capture all variables, the plots are provided above for each variable (-concavity_points and -fractal dimensions). A GAM is therefore, a simple method to capture multiple predictors in an interpretable fashion.
+
+If we compare the AIC score, we can see that the GAM model performs significantly better than the linear model.
+
+#### 6-2-3) Neural Net
+
+```{r Neural Network}
+
+set.seed(42)
+
+mod_nn <- train(diagnosis~.,
+                  train_factor,
+                  method="nnet",
+                  metric="ROC",
+                  preProcess = c('center', 'scale'),
+                  #tuneLength=10,
+                  trControl=p_control)
+
+pred_nn <- predict(mod_nn, test_factor)
+cm_nn <- confusionMatrix(pred_nn, test_factor$diagnosis, positive = "M")
+cm_nn
+
+```
+
+The Neural Network has a rounded accuracy of 98%. Likewise, the sensitivity is high (rounded 95%) and specificity with rounded 99%.
+
+#### 6-2-4) KNN
+
+```{r KNN}
+set.seed(42)
+
+mod_knn <- train(diagnosis ~., data = train_factor, 
+                      method = "knn", 
+                      metric = "ROC", 
+                      preProcess = c("scale", "center"), 
+                      trControl = p_control, 
+                      tuneLength =10)
+
+pred_knn <- predict(mod_knn, test_factor)
+cm_knn <- confusionMatrix(pred_knn, test_factor$diagnosis, positive = "M")
+cm_knn
+plot(mod_knn)
+```
+
+The KNN classifier provides similar results to the NN model, with a slightly lower sensitivity (94%) and lower specificity (97%), and a rounded accuracy of 96%.
+
+#### 7) Comparison
+
+```{r Comparison}
+
+ 
+mod_list <- list(LDA = mod_lda ,GLM = glm_mod, NN=mod_nn, KNN = mod_knn, GAM = gam_test_model)
+resamples <- resamples(mod_list)
+results <- resamples(mod_list)
+summary(results)
+bwplot(results, metric = "ROC")
+cm_list <- list(cm_glm = cm_glm, cm_nn = cm_nn, cm_knn = cm_knn, cm_lda = cm_lda, cm_gamboost = cm_gamboost)
+results <- sapply(cm_list, function(x) x$byClass)
+
+results
+
+
+```
+
+The final plot shows us the best models in a bwplot. All models a high performance. NN and LDA had the least variability, which can be seen in the plot above. E.g. GLM, even though it has a high ROC score has a high variance. Interestingly, the GAM model with ("gamboost" method, because "gam" did not work) provides high accuracy with the lowest variability.
+
+I have provided several classifiers, linear and non-linear models to successfully predict and estimate malignant and benign breast cancer. Likewise, AIC scores indicate a better fit of GAM models over Linear regression models with this data set. Therefore, it would be interesting for further research how this affects non-linear modelling of other cancer types based on time-series.
