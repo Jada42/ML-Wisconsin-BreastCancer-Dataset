@@ -1,5 +1,5 @@
 ---
-title: "Classification of Breast Cancer & Visualization Assignment Data Mining"
+title: "Classification of Breast Cancer & Visualization"
 Student: Julian Adam
 Date: '2022-09-28'
 output:
