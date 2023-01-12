@@ -1,7 +1,7 @@
 ---
 title: "Classification of Breast Cancer & Visualization"
-Student: Julian Adam
-Date: '2022-09-28'
+Name: 
+Date: 'YYYY-MM-DD'
 output:
   pdf_document: default
   word_document: default
